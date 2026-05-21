@@ -1,18 +1,71 @@
 # Visualization
 
-ALE offers screen display and audio capabilities via the Simple DirectMedia Layer (SDL).
-Instructions on how to install the SDL library, as well as enabling SDL support within ALE can be found in the section [Getting Started](./getting-started.md).
-Screen display can be enabled using the boolean option `display_screen` (default: `false`), 
-and sound playback using the boolean option `sound` (default: `false`).
+ALE offers screen display and audio capabilities via the Simple DirectMedia Layer (SDL). Screen display can be enabled using the boolean option `display_screen` (default: `false`), and sound playback using the boolean option `sound` (default: `false`).
 
-##  Recording Movies
+## Gymnasium API
 
-ALE now provides support for recording frames; if sound is enabled, it is also possible to record audio output.
-An example Python program is provided which will record both visual and audio output for a single episode of play. A similar example using C++ can be found at [`examples/video-recording`](https://github.com/mgbellemare/Arcade-Learning-Environment/tree/master/examples/video-recording).
+[Gymnasium](https://github.com/farama-Foundation/gymnasium) provides two methods for visualizing an environment, human rendering and video recording.
 
+### Human visualization
 
-### Python Example
-```py
+Through specifying the environment `render_mode="human"` then ALE will automatically create a window running at 60 frames per second showing the environment behaviour. It is highly recommended to close the environment after it has been used such that the rendering information is correctly shut down.
+
+```python
+import gymnasium
+import ale_py
+
+gymnasium.register_envs(ale_py)
+
+env = gymnasium.make("ALE/Pong-v5", render_mode="human")
+env.reset()
+for _ in range(100):
+    action = env.action_space.sample()
+
+    obs, reward, terminated, truncated, info = env.step(action)
+
+    if terminated or truncated:
+        obs, info = env.reset()
+
+env.close()
+```
+
+### Recording videos
+
+Specifying the `render_mode="rgb_array"` will return the rgb array from `env.render()`, this can be combined with the `gymnasium.wrappers.RecordVideo` where the environment renders are stored and saved as mp4 videos for episodes.
+
+The example below will record episodes on every other episode (`num % 2 == 0`) using the `episode_trigger` and save the folders in `saved-video-folder` with filename starting `video-` followed by the video number.
+
+```python
+import gymnasium
+import ale_py
+
+gymnasium.register_envs(ale_py)
+
+env = gymnasium.make("ALE/Pong-v5", render_mode="rgb_array")
+env = gymnasium.wrappers.RecordVideo(
+    env,
+    episode_trigger=lambda num: num % 2 == 0,
+    video_folder="saved-video-folder",
+    name_prefix="video-",
+)
+for episode in range(10):
+    obs, info = env.reset()
+    episode_over = False
+
+    while not episode_over:
+        action = env.action_space.sample()
+        obs, reward, terminated, truncated, info = env.step(action)
+
+        episode_over = terminated or truncated
+
+env.close()
+```
+
+## Python Interface
+
+ALE now provides support for recording frames; if sound is enabled, it is also possible to record audio output. An example Python program is provided which will record both visual and audio output for a single episode of play.
+
+```python
 import os
 import sys
 from random import randrange
@@ -50,14 +103,14 @@ if __name__ == '__main__':
 
     rom_file = sys.argv[1]
     record_dir = sys.argv[2]
-    main(rom_file)
+    main(rom_file, "videos/")
 ```
 
 Once frames and/or sound have been recorded, they may be joined into a video using an external program like [ffmpeg](https://www.ffmpeg.org). For example, you can run:
 
 ```bash
 # -r frame_rate
-# -i input 
+# -i input
 # -f format
 # -c:a audio_codec
 # -c:v video_codec
@@ -70,5 +123,3 @@ ffmpeg -r 60 \
        -c:v libx264 \
        agent.mov
 ```
-
-The parameters may vary depending on the format, you can find more examples at [`examples/video-recording`](https://github.com/mgbellemare/Arcade-Learning-Environment/tree/master/examples/video-recording).

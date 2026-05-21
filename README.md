@@ -1,12 +1,10 @@
-The Arcade Learning Environment
-<a href="#the-arcade-learning-environment">
-  <img alt="Arcade Learning Environment" align="right" src="docs/static/ale.svg" width=75 />
-</a>
-===============================
-
-[![Build ALE](https://github.com/mgbellemare/Arcade-Learning-Environment/actions/workflows/build-ale.yml/badge.svg)](https://github.com/mgbellemare/Arcade-Learning-Environment/actions/workflows/build-ale.yml)
+[![Python](https://img.shields.io/pypi/pyversions/ale-py.svg)](https://badge.fury.io/py/ale-py)
 [![PyPI Version](https://img.shields.io/pypi/v/ale-py)](https://pypi.org/project/ale-py)
 
+<p align="center">
+    <a href="https://ale.farama.org/" target = "_blank">
+    <img src="https://github.com/Farama-Foundation/Arcade-Learning-Environment/blob/master/ale-text.png" width="500px" />
+</a>
 
 **The Arcade Learning Environment (ALE) is a simple framework that allows researchers and hobbyists to develop AI agents for Atari 2600 games.**
 It is built on top of the Atari 2600 emulator [Stella](https://stella-emu.github.io) and separates the details of emulation from agent design.
@@ -19,20 +17,19 @@ Features
 --------
 
 - Object-oriented framework with support to add agents and games.
-- Emulation core uncoupled from rendering and sound generation modules for fast
-  emulation with minimal library dependencies.
-- Automatic extraction of game score and end-of-game signal for more than 100
-  Atari 2600 games.
+- Emulation core uncoupled from rendering and sound generation modules for fast emulation with minimal library dependencies.
+- Automatic extraction of game score and end-of-game signal for more than 100  Atari 2600 games.
 - Multi-platform code (compiled and tested under macOS, Windows, and several Linux distributions).
-- Python bindings through [pybind11](https://github.com/pybind/pybind11).
-- Native support for OpenAI Gym.
-- Visualization tools.
+- Python bindings through [nanobind](https://github.com/wjakob/nanobind).
+- Native support for [Gymnasium](http://github.com/farama-Foundation/gymnasium), the maintained fork of OpenAI Gym.
+- Atari roms are packaged within the pip package.
+- C++ based vectorizer for acting in multiple ROMs at the same time.
+- WebAssembly support for running ALE in the Browser
 
 Quick Start
 ===========
 
-The ALE currently supports three different interfaces: C++, Python, and OpenAI Gym.
-
+The ALE currently supports three different interfaces: C++, Python, Gymnasium and WASM.
 
 Python
 ------
@@ -42,68 +39,59 @@ You simply need to install the `ale-py` package distributed via PyPI:
 ```shell
 pip install ale-py
 ```
-Note: Make sure you're using an up to date version of `pip` or the install may fail.
+Note: Make sure you're using an up-to-date version of `pip` or the installation may fail.
 
+Note: Free-threaded CPython (the `t` ABI, e.g. `python3.14t`) aren't supported as OpenCV doesn't build compatible wheels on any system which is necessary for preprocessing. We will look to add support when OpenCV does.
 
-You can now import the ALE in your Python projects with
+You can now import the ALE in your Python projects with providing a direct interface to Stella for interacting with games
 ```python
-from ale_py import ALEInterface
+from ale_py import ALEInterface, roms
 
 ale = ALEInterface()
+ale.loadROM(roms.get_rom_path("breakout"))
+ale.reset_game()
+
+reward = ale.act(0)  # noop
+screen_obs = ale.getScreenRGB()
 ```
 
-### ROM Management
+## Gymnasium
 
-The ALE doesn't distribute ROMs but we do provide a couple tools for managing your ROMs. First is the command line tool `ale-import-roms`. You can simply specify a directory as the first argument to this tool and we'll import all supported ROMs by the ALE.
-
-```shell
-ale-import-roms roms/
-
-[SUPPORTED]       breakout   roms/breakout.bin
-[SUPPORTED]       freeway    roms/freeway.bin
-
-[NOT SUPPORTED]              roms/custom.bin
-
-Imported 2/3 ROMs
-```
-Furthermore, Python packages can expose ROMs for discovery using the special `ale-py.roms` entry point. For more details check out the example [python-rom-package](./examples/python-rom-package).
-
-Once you've imported a supported ROM you can simply import the path from the `ale-py.roms` package and load the ROM in the ALE:
-```py
-from ale_py.roms import Breakout
-
-ale.loadROM(Breakout)
-```
-
-## OpenAI Gym
-
-Gym support is included in `ale-py`. Simply install  the Python package using the instructions above. You can also install `gym[atari]` which also installs `ale-py` with Gym.
-
-As of Gym v0.20 and onwards all Atari environments are provided via `ale-py`. We do recommend using the new `v5` environments in the `ALE` namespace:
+For simplicity for installing ale-py with Gymnasium, `pip install "gymnasium[atari]"` shall install all necessary modules and ROMs. See Gymnasium [introductory page](https://gymnasium.farama.org/main/introduction/basic_usage/) for description of the API to interface with the environment.
 
 ```py
-import gym
+import gymnasium as gym
+import ale_py
 
-env = gym.make('ALE/Breakout-v5')
+gym.register_envs(ale_py)  # unnecessary but helpful for IDEs
+
+env = gym.make('ALE/Breakout-v5', render_mode="human")  # remove render_mode in training
+obs, info = env.reset()
+episode_over = False
+while not episode_over:
+    action = policy(obs)  # to implement - use `env.action_space.sample()` for a random policy
+    obs, reward, terminated, truncated, info = env.step(action)
+
+    episode_over = terminated or truncated
+env.close()
 ```
-The `v5` environments follow the latest methodology set out in [Revisiting the Arcade Learning Environment by Machado et al.](https://jair.org/index.php/jair/article/view/11182).
 
-The only major change difference from Gym's `AtariEnv` is that we'd recommend not using the `env.render()` method in favour of supplying the `render_mode` keyword argument during environment initialization. The `human` render mode will give you the advantage of: frame perfect rendering, audio support, and proper resolution scaling. For more information check out [docs/gym-interface.md](./docs/gym-interface.md).
+To run with continuous actions, you can simply modify the call to `gym.make` above with:
+```python
+env = gym.make('ALE/Breakout-v5', continuous=True, render_mode="human")
+```
 
-For more information on changes to the Atari environments in OpenAI Gym please check out [the following blog post](https://brosa.ca/blog/ale-release-v0.7).
+For all the environments available and their description, see [gymnasium atari page](https://gymnasium.farama.org/environments/atari/).
+
+A vectorized environment with preprocessing, written in C++, is also available with `gym.make_vec("ALE/Breakout-v5", num_envs=10)`.
+See [vector-environment](https://ale.farama.org/vector-environment/) for more information.
 
 C++
 ---
 
-You must have a valid C++17 compiler and the following dependencies installed (we recommend using [`vcpkg`](https://github.com/microsoft/vcpkg) on all platforms)
+The following instructions will assume you have a valid C++17 compiler and [`vcpkg`](https://github.com/microsoft/vcpkg) installed.
 
-```sh
-vcpkg install zlib sdl2
-```
-
-Note: `sdl` is optional but can be useful for display/audio support (i.e., `display_screen` and `sound` config options).
-
-We use CMake as a first class citizen and you can use the ALE directly with any CMake project.
+We use CMake as a first class citizen, and you can use the ALE directly with any CMake project.
 To compile and install the ALE you can run
 
 ```sh
@@ -112,15 +100,41 @@ cmake ../ -DCMAKE_BUILD_TYPE=Release
 cmake --build . --target install
 ```
 
-There are optional flags `-DSDL_SUPPORT=ON/OFF` to toggle SDL support (`OFF` by default), `-DBUILD_CPP_LIB=ON/OFF` to build
+There are optional flags `-DSDL_SUPPORT=ON/OFF` to toggle SDL support (i.e., `display_screen` and `sound` support; `OFF` by default), `-DBUILD_CPP_LIB=ON/OFF` to build
 the `ale-lib` C++ target (`ON` by default), and `-DBUILD_PYTHON_LIB=ON/OFF` to build the pybind11 wrapper (`ON` by default).
 
-Finally you can link agaisnt the ALE in your own CMake project as follows
+Finally, you can link against the ALE in your own CMake project as follows
 
 ```cmake
 find_package(ale REQUIRED)
 target_link_libraries(YourTarget ale::ale-lib)
 ```
+
+WebAssembly
+---
+
+The ALE can be compiled to WebAssembly for use directly in web browsers, enabling interactive demos, educational tools, and browser-based RL experiments without any installation.
+
+This be used through NPM (`> npm install @farama/ale-wasm`) or through a standalone compiled zip (see the release artifacts).
+
+**Example NPM usage:**
+```javascript
+import createALEModule from './ale.js';
+
+const ALE = await createALEModule();
+const ale = new ALE.ALEInterface();
+
+await ale.loadROM('roms/breakout.bin');
+ale.resetGame();
+
+while (!ale.gameOver()) {
+    const actions = ale.getMinimalActionSet();
+    const action = actions[Math.floor(Math.random() * actions.length)];
+    const reward = ale.act(action);
+}
+```
+
+For more examples for NPM and standalone installs, see [docs/wasm/](docs/wasm/).
 
 Citing
 ======
@@ -159,5 +173,20 @@ In BibTex format:
     volume = {61},
     pages = {523--562},
     year = {2018}
+}
+```
+
+If you use the CALE (Continuous ALE), we ask you that you also cite the following:
+
+*Jesse Farebrother and Pablo Samuel Castro.  Cale:  Continuous arcade learning environment.Ad-vances in Neural Information Processing Systems, 2024.*
+
+In BibTex format:
+
+```bibtex
+@article{farebrother2024cale,
+  title={C{ALE}: Continuous Arcade Learning Environment},
+  author={Jesse Farebrother and Pablo Samuel Castro},
+  journal={Advances in Neural Information Processing Systems},
+  year={2024}
 }
 ```

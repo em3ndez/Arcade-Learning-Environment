@@ -1,9 +1,11 @@
-import pytest
 import os
 import pickle
 import tempfile
-import numpy as np
+
 import ale_py
+import numpy as np
+import pytest
+from utils import ale, random_rom_path, tetris, tetris_rom_path  # noqa: F401
 
 
 def test_ale_version():
@@ -56,7 +58,23 @@ def test_game_over(tetris):
     assert not tetris.game_over()
     while not tetris.game_over():
         tetris.act(0)
+    assert tetris.game_over(with_truncation=False)
+    assert tetris.game_over(with_truncation=True)
     assert tetris.game_over()
+
+
+def test_game_over_truncation(ale, tetris_rom_path):
+    ale.setInt("max_num_frames_per_episode", 10)
+    ale.setInt("frame_skip", 1)
+    ale.loadROM(tetris_rom_path)
+    ale.reset_game()
+    for _ in range(10):
+        ale.act(0)
+
+    assert ale.getEpisodeFrameNumber() == 10
+    assert ale.game_over(with_truncation=True)
+    assert not ale.game_over(with_truncation=False)
+    assert ale.game_truncated()
 
 
 def test_get_ram(tetris):
@@ -66,14 +84,18 @@ def test_get_ram(tetris):
     assert (ram == preallocate).all()
 
     preallocate = np.empty((tetris.getRAMSize()), dtype=np.int32)
-    with pytest.raises(TypeError) as exc_info:
+    with pytest.raises(
+        TypeError,
+        match=r"incompatible function arguments\. The following argument types are supported",
+    ):
         tetris.getRAM(preallocate)
-    assert exc_info.type == TypeError
 
-    preallocate = np.empty((1), dtype=np.uint8)
-    with pytest.raises(RuntimeError) as exc_info:
+    preallocate = np.empty(1, dtype=np.uint8)
+    with pytest.raises(
+        TypeError,
+        match=r"incompatible function arguments\. The following argument types are supported",
+    ):
         tetris.getRAM(preallocate)
-    assert exc_info.type == RuntimeError
 
 
 def test_set_ram(tetris):
@@ -153,7 +175,10 @@ def test_get_episode_frame_number(tetris):
 def test_get_screen_dims(tetris):
     dims = tetris.getScreenDims()
     assert isinstance(dims, tuple)
-    assert dims == (210, 160,)
+    assert dims == (
+        210,
+        160,
+    )
 
 
 def test_get_screen_rgb(tetris):
@@ -202,10 +227,23 @@ def test_save_screen_png(tetris):
     os.remove(file)
 
 
-def test_is_rom_supported(ale, test_rom_path, random_rom_path):
-    assert ale.isSupportedROM(test_rom_path)
+def test_get_sound_obs(ale, tetris_rom_path):
+    ale.setBool("sound_obs", True)
+    ale.loadROM(tetris_rom_path)
+    for _ in range(10):
+        ale.act(0)
+
+    preallocate = np.zeros(ale.getAudioSize(), dtype=np.uint8)
+    ale.getAudio(preallocate)
+
+    sound = ale.getAudio()
+    assert (preallocate == sound).all()
+
+
+def test_is_rom_supported(ale, tetris_rom_path, random_rom_path):
+    assert ale.isSupportedROM(tetris_rom_path)
     assert ale.isSupportedROM(random_rom_path) is None
-    with pytest.raises(RuntimeError) as exc_info:
+    with pytest.raises(RuntimeError):
         ale.isSupportedROM("notfound")
 
 
@@ -220,10 +258,10 @@ def test_clone_restore_state(tetris):
     assert tetris.cloneState() == state
 
 
-def test_clone_restore_state_determinism(ale, test_rom_path):
+def test_clone_restore_state_determinism(ale, tetris_rom_path):
     ale.setInt("random_seed", 0)
     ale.setFloat("repeat_action_probability", 0.0)
-    ale.loadROM(test_rom_path)
+    ale.loadROM(tetris_rom_path)
     ale.reset_game()
 
     num_actions = 100
@@ -249,10 +287,10 @@ def test_clone_restore_state_determinism(ale, test_rom_path):
     assert not all_equal
 
 
-def test_clone_restore_state_stochasticity(ale, test_rom_path):
+def test_clone_restore_state_stochasticity(ale, tetris_rom_path):
     ale.setInt("random_seed", 0)
     ale.setFloat("repeat_action_probability", 0.25)
-    ale.loadROM(test_rom_path)
+    ale.loadROM(tetris_rom_path)
     ale.reset_game()
 
     num_actions = 100
@@ -278,10 +316,10 @@ def test_clone_restore_state_stochasticity(ale, test_rom_path):
     assert not all_equal
 
 
-def test_clone_restore_state_include_rng(ale, test_rom_path):
+def test_clone_restore_state_include_rng(ale, tetris_rom_path):
     ale.setInt("random_seed", 0)
     ale.setFloat("repeat_action_probability", 0.25)
-    ale.loadROM(test_rom_path)
+    ale.loadROM(tetris_rom_path)
     ale.reset_game()
 
     num_actions = 100
@@ -297,16 +335,16 @@ def test_clone_restore_state_include_rng(ale, test_rom_path):
                 ale.reset()
         return states
 
-    _get_states(seq[:num_actions//2])
+    _get_states(seq[: num_actions // 2])
     without_rng = ale.cloneState()
     with_rng = ale.cloneState(include_rng=True)
-    second_half = _get_states(seq[num_actions//2:])
+    second_half = _get_states(seq[num_actions // 2 :])
 
     ale.restoreState(without_rng)
-    second_half_without_rng = _get_states(seq[num_actions//2:])
+    second_half_without_rng = _get_states(seq[num_actions // 2 :])
 
     ale.restoreState(with_rng)
-    second_half_with_rng = _get_states(seq[num_actions//2:])
+    second_half_with_rng = _get_states(seq[num_actions // 2 :])
 
     def _all_equal(first, second):
         all_equal = True
@@ -318,10 +356,10 @@ def test_clone_restore_state_include_rng(ale, test_rom_path):
     assert not _all_equal(second_half, second_half_without_rng)
 
 
-def test_clone_restore_system_state(ale, test_rom_path):
+def test_clone_restore_system_state(ale, tetris_rom_path):
     ale.setInt("random_seed", 0)
     ale.setFloat("repeat_action_probability", 0.25)
-    ale.loadROM(test_rom_path)
+    ale.loadROM(tetris_rom_path)
     ale.reset_game()
 
     num_actions = 100
@@ -360,7 +398,7 @@ def test_state_pickle(tetris):
     state = tetris.cloneState()
     file = os.path.join(tempfile.gettempdir(), "ale-state.p")
     with open(file, "wb") as fp:
-        data = pickle.dump(state, fp)
+        pickle.dump(state, fp)
 
     tetris.reset_game()
     assert tetris.cloneState() != state
@@ -371,17 +409,18 @@ def test_state_pickle(tetris):
     assert tetris.cloneState() == state
     os.remove(file)
 
-@pytest.mark.skipif(ale_py.SDL_SUPPORT is False,
-                    reason="SDL is disabled")
-def test_display_screen(ale, test_rom_path):
+
+@pytest.mark.skipif(ale_py.SDL_SUPPORT is False, reason="SDL is disabled")
+def test_display_screen(ale, tetris_rom_path):
     os.environ["SDL_VIDEODRIVER"] = "dummy"
     ale.setBool("display_screen", True)
     ale.setBool("sound", False)
-    ale.loadROM(test_rom_path)
+    ale.loadROM(tetris_rom_path)
     for _ in range(10):
         ale.act(0)
-    del os.environ['SDL_VIDEODRIVER']
+    del os.environ["SDL_VIDEODRIVER"]
     assert True
+
 
 def test_set_logger(ale):
     ale.setLoggerMode(ale_py.LoggerMode.Info)

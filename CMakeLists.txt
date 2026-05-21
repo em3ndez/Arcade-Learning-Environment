@@ -1,7 +1,73 @@
 cmake_minimum_required (VERSION 3.14)
 
+# Build the C++ shared library
+option(BUILD_CPP_LIB "Build C++ Interface" ON)
+
+# Build the native Python bindings using pybind11
+option(BUILD_PYTHON_LIB "Build Python Interface" ON)
+
+# Enable SDL for screen and audio support
+option(SDL_SUPPORT "Enable SDL support" OFF)
+# Append VCPKG manifest feature
+if(SDL_SUPPORT)
+  list(APPEND VCPKG_MANIFEST_FEATURES "sdl")
+endif()
+
+option(BUILD_VECTOR_LIB "Build Vector Interface" OFF)
+if (BUILD_VECTOR_LIB)
+  list(APPEND VCPKG_MANIFEST_FEATURES "vector")
+endif()
+
+option(BUILD_VECTOR_XLA_LIB "Build with Vector XLA Support" OFF)
+
+option(BUILD_WASM_LIB "Build WebAssembly Interface" OFF)
+if (BUILD_WASM_LIB)
+  add_definitions(-DBUILD_WASM_LIB)
+  # WASM builds disable incompatible features
+  set(BUILD_PYTHON_LIB OFF CACHE BOOL "Python not supported in WASM build" FORCE)
+  set(BUILD_VECTOR_LIB OFF CACHE BOOL "Vector lib requires threading not well-supported in WASM" FORCE)
+  set(BUILD_CPP_LIB OFF CACHE BOOL "Building WASM interface instead" FORCE)
+  set(BUILD_VECTOR_XLA_LIB OFF CACHE BOOL "XLA not supported in WASM build" FORCE)
+  # SDL is required for WASM (Emscripten provides SDL2 compatibility layer)
+  set(SDL_SUPPORT ON CACHE BOOL "SDL required for WASM" FORCE)
+  list(APPEND VCPKG_MANIFEST_FEATURES "sdl")
+endif()
+
+# Sanitizer support for debugging (thread, address, undefined)
+# Usage: -DENABLE_SANITIZER=thread or -DENABLE_SANITIZER=address
+set(ENABLE_SANITIZER "" CACHE STRING "Enable sanitizer (thread, address, or empty to disable)")
+set_property(CACHE ENABLE_SANITIZER PROPERTY STRINGS "" "thread" "address")
+
+if(ENABLE_SANITIZER)
+  if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND NOT CMAKE_CXX_COMPILER_ID MATCHES "GNU")
+    message(WARNING "Sanitizers are best supported with Clang or GCC. Current compiler: ${CMAKE_CXX_COMPILER_ID}")
+  endif()
+
+  if(ENABLE_SANITIZER STREQUAL "thread")
+    message(STATUS "Building with Thread Sanitizer (TSan)")
+    add_compile_options(-fsanitize=thread -g -O1)
+    add_link_options(-fsanitize=thread)
+  elseif(ENABLE_SANITIZER STREQUAL "address")
+    message(STATUS "Building with Address Sanitizer (ASan) + Undefined Behavior Sanitizer (UBSan)")
+    # Drop vptr/function UBSan checks: they require libclang_rt.ubsan_standalone_cxx,
+    # which is static-only. When the instrumented .so is loaded by an uninstrumented
+    # Python, __ubsan_vptr_type_cache and friends end up undefined at import time.
+    add_compile_options(-fsanitize=address -fsanitize=undefined -fno-sanitize=vptr,function -fno-omit-frame-pointer -g -O1)
+    add_link_options(-fsanitize=address -fsanitize=undefined -fno-sanitize=vptr,function)
+  else()
+    message(FATAL_ERROR "Invalid sanitizer '${ENABLE_SANITIZER}'. Choose 'thread' or 'address'.")
+  endif()
+endif()
+
 # Set cmake module path
 set(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake ${CMAKE_MODULE_PATH})
+
+# Overlay VCPKG custom triplets
+if(NOT DEFINED VCPKG_OVERLAY_TRIPLETS)
+  set(VCPKG_OVERLAY_TRIPLETS
+      "${CMAKE_MODULE_PATH}/custom-triplets"
+      CACHE STRING "")
+endif()
 
 # Discover VCPKG default triplet
 if(DEFINED ENV{VCPKG_DEFAULT_TRIPLET} AND NOT DEFINED VCPKG_TARGET_TRIPLET)
@@ -42,10 +108,10 @@ project(ale VERSION ${ALE_DEFAULT_VERSION}
             LANGUAGES CXX)
 
 # Main ALE src directory
-add_subdirectory(src)
+add_subdirectory(src/ale)
 
 # Only include tests in the main project
-if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
-  enable_testing()
-  add_subdirectory(tests)
-endif()
+# if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
+#  enable_testing()
+#  add_subdirectory(tests)
+# endif()
